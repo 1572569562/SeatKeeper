@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="cn.edu.stu.seatkeeper.mapper.ReservationMapper">
+    <!-- 预约快照字段，包含用于条件更新的版本号。 -->
+    <sql id="columns">id, user_id, seat_id, slot_start, slot_end, status, check_in_deadline, version</sql>
+    <!-- 结束时间只从已登记时段取得，未登记的开始时间插入零行。 -->
+    <insert id="insertFromSlot">
+        INSERT INTO reservation (user_id, seat_id, slot_start, slot_end, status, check_in_deadline, version)
+        SELECT #{userId}, #{seatId}, start_time, end_time, 'RESERVED', #{deadline}, 0
+        FROM slot WHERE start_time = #{slotStart}
+    </insert>
+    <!-- 必须在创建预约的同一事务连接中读取，不能跨连接取得自增标识。 -->
+    <select id="lastInsertId" resultType="long">SELECT LAST_INSERT_ID()</select>
+    <!-- 按主键读取预约快照；对外服务仍需校验调用用户的归属。 -->
+    <select id="find" resultType="cn.edu.stu.seatkeeper.model.po.ReservationPO">
+        SELECT <include refid="columns"/> FROM reservation WHERE id = #{id}
+    </select>
+    <!-- 限定用户后按时段及标识倒序分页，避免只按时间排序出现不稳定顺序。 -->
+    <select id="listByUser" resultType="cn.edu.stu.seatkeeper.model.po.ReservationPO">
+        SELECT <include refid="columns"/> FROM reservation WHERE user_id = #{userId}
+        ORDER BY slot_start DESC, id DESC LIMIT #{limit} OFFSET #{offset}
+    </select>
+    <!-- 用户归属和旧版本同时匹配才修改；成功后递增版本，零行表示条件不再满足。 -->
+    <update id="changeStatus">
+        UPDATE reservation SET status = #{status}, version = version + 1
+        WHERE id = #{id} AND user_id = #{userId} AND version = #{expectedVersion}
+    </update>
+</mapper>

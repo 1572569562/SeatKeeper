@@ -1,0 +1,37 @@
+server:
+  address: ${SERVER_ADDRESS:127.0.0.1}
+  port: ${SERVER_PORT:8080}
+spring:
+  application:
+    name: seatkeeper-service
+  datasource:
+    url: ${DB_URL:jdbc:mysql://127.0.0.1:3307/seatkeeper?serverTimezone=Asia/Shanghai&characterEncoding=UTF-8}
+    username: ${DB_USER:seatkeeper}
+    password: ${DB_PASSWORD:}
+    # 复用数据库连接；上限限制并发连接数量，避免每次请求都新建连接。
+    hikari:
+      maximum-pool-size: ${DB_POOL_MAX:10}
+      minimum-idle: ${DB_POOL_MIN:2}
+      connection-timeout: 10000
+      connection-init-sql: "SET time_zone = '+08:00'"
+      # 信用行锁配合读已提交，避免不同用户首次写流水时的缺失键间隙锁竞争。
+      transaction-isolation: TRANSACTION_READ_COMMITTED
+  # 启动时校验和执行版本迁移，已经执行过的版本脚本保持原文。
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    # 禁止通过迁移工具执行清库；演示重置仅清理指定业务数据并保留历史。
+    clean-disabled: true
+    validate-on-migrate: true
+  jackson:
+    time-zone: Asia/Shanghai
+mybatis:
+  mapper-locations: classpath:mapper/*.xml
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: never

@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="cn.edu.stu.seatkeeper.mapper.NotificationMapper">
+    <!-- 通知快照字段，标识既用于排序也用于增量游标。 -->
+    <sql id="columns">id, user_id, type, content, read_flag, created_at</sql>
+    <!-- 调用方必须先持有该用户信用行锁，再插入并分配通知标识。 -->
+    <insert id="insert">
+        INSERT INTO notification (user_id, type, content) VALUES (#{userId}, #{type}, #{content})
+    </insert>
+    <!-- 紧接同事务插入读取连接级自增标识，保持与刚写入的通知对应。 -->
+    <select id="lastInsertId" resultType="long">SELECT LAST_INSERT_ID()</select>
+    <!-- 通知主键和用户标识一起过滤，防止越权读取。 -->
+    <select id="findForUser" resultType="cn.edu.stu.seatkeeper.model.po.NotificationPO">
+        SELECT <include refid="columns"/> FROM notification WHERE id = #{id} AND user_id = #{userId}
+    </select>
+    <!-- 用户历史列表按标识倒序；持续同步应使用游标方法，避免新增记录改变偏移。 -->
+    <select id="page" resultType="cn.edu.stu.seatkeeper.model.po.NotificationPO">
+        SELECT <include refid="columns"/> FROM notification WHERE user_id = #{userId}
+        ORDER BY id DESC LIMIT #{limit} OFFSET #{offset}
+    </select>
+    <!-- 仅补拉当前用户严格大于游标的数据，升序返回；游标保存最后一条实际返回记录的标识。 -->
+    <select id="after" resultType="cn.edu.stu.seatkeeper.model.po.NotificationPO">
+        SELECT <include refid="columns"/> FROM notification WHERE user_id = #{userId} AND id &gt; #{afterId}
+        ORDER BY id ASC LIMIT #{limit}
+    </select>
+    <!-- 即使传入其他用户的通知标识也不会修改；仅更新未读记录，使返回行数表示实际变化。 -->
+    <update id="markRead">
+        UPDATE notification SET read_flag = TRUE WHERE user_id = #{userId} AND read_flag = FALSE
+        AND id IN <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
+    </update>
+    <!-- 严格早于保留期；排序后限制批量，未读数据不会进入清理范围。 -->
+    <delete id="cleanupReadBefore">
+        DELETE FROM notification WHERE read_flag = TRUE AND created_at &lt; #{cutoff}
+        ORDER BY created_at, id LIMIT #{limit}
+    </delete>
+</mapper>
