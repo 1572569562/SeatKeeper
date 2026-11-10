@@ -1,6 +1,12 @@
-target/
+**/target/
 .idea/
 *.iml
+.vscode/
 .env
+.env.*
+!.env.example
 *.log
 .DS_Store
+backups/
+scripts/tests/artifacts/
+.runtime/
