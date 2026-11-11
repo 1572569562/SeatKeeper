@@ -1,1 +1,5 @@
 * text=auto eol=lf
+
+# Windows 批处理必须保留 CRLF，否则 cmd 解析会出错
+*.bat text eol=crlf
+*.cmd text eol=crlf
