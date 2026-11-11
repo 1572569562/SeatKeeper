@@ -2,7 +2,7 @@
 
 本工程实现团队执行手册中“成员4：数据与平台”的W1—W8工作，提供可供成员3接入的数据库和持久化组件。已经完成的代码、验证情况和后续团队联调分别记录如下。团队仓库为 [1572569562/SeatKeeper](https://github.com/1572569562/SeatKeeper)，成员4工作分支为 `feature/member4-data-platform`。
 
-当前工程按照个人规范整理Java分层，保留团队手册规定的common/service两个Maven模块。独立复用模板保留在本地同级目录，不包含在本次团队仓库提交中；模板与正式工程使用不同数据库，不能混用Flyway历史。
+当前工程按照个人规范整理Java分层，团队手册规定的模块现有 common、service、gateway 三个。独立复用模板保留在本地同级目录，不包含在本次团队仓库提交中；模板与正式工程使用不同数据库，不能混用Flyway历史。
 
 为独立验证数据组件，本工程随附启动骨架、基础响应与异常处理、健康接口。这些基础件供成员3整合；正式架构决策、统一接口协议和错误码由成员3统一。成员4的交接重点是DDL、Mapper、持久化组件、数据一致性测试和运维脚本。
 
@@ -58,13 +58,29 @@ seatkeeper/
 │  ├─ src/main/resources/db/migration/  V1七表结构
 │  ├─ src/main/resources/db/demo/  V2可选演示数据
 │  └─ src/test/                   19项单测和14项真实MySQL集成测试
+├─ seatkeeper-gateway/            成员6：通知网关，独立进程固定8082
+│  ├─ src/main/java/cn/edu/stu/seatkeeper/gateway/  GatewayApplication、GatewayController
+│  ├─ src/main/resources/application.yml  端口8082，Actuator health/info
+│  └─ start-gateway.bat           构建并启动，Windows下双击可用
 ├─ deploy/compose.mysql.yml        MySQL8.0，仅绑定本机
 ├─ scripts/                       启动、备份、恢复、重置及EXPLAIN
 ├─ docs/                          数据字典、DDL、交接与验证记录
 └─ .env.example                   配置样例，不包含真实密码
 ```
 
-当前只实现common和service两个模块。JavaFX、守护节点、通知网关、完整登录/JWT及预约公共接口由对应成员实现。健康接口为 `GET /api/v1/health`，Actuator为 `GET /actuator/health`；没有匿名数据写入API。
+当前已实现common、service、gateway三个模块。JavaFX、守护节点、完整登录/JWT及预约公共接口由对应成员实现。service健康接口为 `GET /api/v1/health`，Actuator为 `GET /actuator/health`；gateway健康检查为 `GET /actuator/health`、存活探针为 `GET /api/v1/gateway/ping`；没有匿名数据写入API。
+
+### 通知网关模块（seatkeeper-gateway，成员6）
+
+独立进程、固定端口8082，部署在D机，与service分开启动。W1只提供模块骨架、健康检查和存活探针，尚未连接数据库；会话游标、通知轮询与WebSocket按团队周计划在后续周次加入。
+
+```cmd
+mvn -q -DskipTests -pl seatkeeper-gateway -am package
+seatkeeper-gateway\start-gateway.bat
+curl http://localhost:8082/api/v1/gateway/ping
+```
+
+数据侧只读 `notification` 表，不写任何业务表。由于MySQL仅监听A机本机，网关在D机时的跨机接入方式需与成员3确认（见下文四机部署说明）。模块细节见 [网关模块说明](seatkeeper-gateway/README.md)。
 
 分层和命名参照 [java-springboot-backend-standards](https://github.com/beemines/java-springboot-backend-standards)：Controller → Service接口 → ServiceImpl → Mapper；DTO接收参数、PO对应数据库、VO对外返回。Result/ResultUtil位于common模块，响应字段保持 `code/message/data`，成功码为 `OK`。
 
