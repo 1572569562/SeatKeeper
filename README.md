@@ -6,6 +6,8 @@
 
 为独立验证数据组件，本工程随附启动骨架、基础响应与异常处理、健康接口。这些基础件供成员3整合；正式架构决策、统一接口协议和错误码由成员3统一。成员4的交接重点是DDL、Mapper、持久化组件、数据一致性测试和运维脚本。
 
+> 成员 3 的服务端领域已完成并交接，接口契约、启动方式、演示账号与对接约定见文末「[成员 3 交接：服务端领域](#成员-3-交接服务端领域)」。
+
 ## 逐周完成清单
 
 | 周次 | 已完成的代码与文件 | 验证状态 |
@@ -154,3 +156,93 @@ mvn -Pintegration verify
 成员3接手顺序：确认DDL/模型与业务规则 → 注入service接口 → 在外层事务串接预约/信用/通知 → 按contracts确定公共API → 与客户端、守护、网关联调。内部实现计划保存在docs/design与docs/plans，README中的待验事项不会被计作已验收。
 
 本轮用于验收的JAR、独立本机MySQL和专用Docker容器在验证后停止；数据目录与Docker卷保留。项目不会修改你的全局JAVA_HOME或原有数据库，后续按上述步骤启动自己的开发环境。
+
+---
+
+# 成员 3 交接：服务端领域
+
+成员3在成员4交付的持久化组件之上，补齐手册表8（W1—W8）要求的业务层：
+认证与角色、预约状态机、签到截止、信用规则、对外 HTTP 接口。
+
+- 分支：`feature/member3-service`（5 个提交，71 个文件，约 +4380 行）
+- 决策记录：[ADR-001 服务端架构与业务规则](docs/design/2026-11-13-member3-adr.md)
+- 一页架构：[架构说明-成员3](docs/架构说明-成员3.md)
+- 实测记录：[成员3验证记录](docs/成员3验证记录.md)
+
+## 接口分组
+
+| 分组 | 前缀 | 鉴权 | 调用方 |
+|---|---|---|---|
+| 认证 | `/api/v1/auth/**` | 无 | 学生端、管理端 |
+| 目录 | `/api/v1/seats`、`/slots` | 用户 JWT | 学生端 |
+| 预约 | `/api/v1/reservations/**` | 用户 JWT | 学生端 |
+| 通知 | `/api/v1/notifications/**` | 用户 JWT | 学生端 |
+| 管理 | `/api/v1/admin/**` | JWT + `ADMIN` | 管理端 |
+| 内部 | `/api/v1/internal/**` | `X-Internal-Token` | 守护节点、网关 |
+
+完整字段、状态码与示例见 [contracts/openapi.yaml](contracts/openapi.yaml)。
+
+## 启动与自检
+
+```powershell
+# 构建
+mvn -DskipTests package
+
+# 启动（自动读 .env，校验 JDK 17，加载演示数据）
+pwsh -File .\scripts\start-service.ps1 -JavaHome $env:JAVA_HOME -Demo
+
+# 一键自检（需服务已启动）
+pwsh -File .\scripts\smoke-member3.ps1
+```
+
+自检覆盖 14 项：健康检查、未认证拦截、登录、座位、时段、创建预约、重复预约 409、
+座位码签到、清理、通知增量、过期批处理、批处理幂等、管理端统计、角色越权，
+输出 `PASS 13 / SKIP 1 / FAIL 0`（`SKIP` 为签到窗口未到）。
+
+## 演示账号
+
+| 学号 | 角色 | 密码 |
+|---|---|---|
+| `20230101`、`20230102` | STUDENT | `Demo@123456`（可用 `DEMO_PASSWORD` 覆盖） |
+| `90000001` | ADMIN | 同上 |
+
+账号只在 `demo` profile 下由 `DemoAccountInitializer` 创建，并在同一事务中建立 `credit` 行
+（通知发送依赖该行作为用户级锁，缺失会以 `NOT_FOUND` 拒绝）。
+
+## 与其他成员的约定
+
+- **时间**：`slotStart` 必须原样回传 `/slots` 返回的字符串（带 `+08:00`），客户端不要自己拼。
+- **错误码**：`409 SEAT_TAKEN`（座位被抢）与 `422 LIMIT_EXCEEDED`（自己订太多）要分开提示；
+  数据层的 `RESERVATION_CONFLICT` 已由全局处理器翻译，不会直接暴露。
+- **成员 6（网关）**：不要直连 MySQL（3306 仅本机），改用
+  `GET /api/v1/internal/notifications?userId=&afterId=`，请求头 `X-Internal-Token`；
+  用返回的 `lastId` 作游标，`hasMore=true` 时立刻再拉一轮。
+- **成员 5（守护节点）**：每 30 秒调 `expire-batch` / `complete-batch`，body `{"limit":100}`；
+  超时或 5xx 直接重试，幂等由状态条件更新与 `credit_log(reservation_id, reason)` 唯一键共同保证。
+- **成员 7（管理端）**：信用调整必须传 `reservationId`（流水挂在预约上），
+  同一预约同一原因只能调一次，二次调整需换 `reason`。
+
+## 与成员4交付的兼容性
+
+- 未修改 `V1`，新增签到时间列走 `V3__checked_in_at.sql`。
+- 未改动成员4任何已有 Mapper 方法签名与 SQL，只增量新增只读查询
+  （`findSeat`、`countActiveByUser`、`listByUserAndStatus`、`markCheckedIn`、批处理候选扫描、管理端 JOIN）。
+- 保留 `READ_COMMITTED` 隔离、生成列、两组活动唯一索引与通知锁顺序。
+- `ReservationPO` 增加 `checkedInAt` 字段，对应 `V3` 新列。
+
+## 配置项（部署时必须覆盖）
+
+| 配置 | 环境变量 | 说明 |
+|---|---|---|
+| 令牌密钥 | `JWT_SECRET` | 至少 32 字节，默认值仅供本机 |
+| 内部密钥 | `INTERNAL_TOKEN` | 守护节点与网关共享，默认值仅供本机 |
+| 演示密码 | `DEMO_PASSWORD` | 仅 `demo` profile 建号用 |
+
+## 已知限制
+
+1. 管理端信用调整必须绑定该用户的一条预约（`credit_log.reservation_id NOT NULL` 决定）：
+   学生没有预约时无法调整；同一预约同一原因只能调一次。
+2. 预约服务端口 `8081` 未使用（手册未说明用途）。
+3. 早到不能签到，签到窗口为 `[slotStart, slotStart+15min]`。
+4. 本机性能基线：座位图 p95 6.4 ms、20 并发 p95 44.3 ms（要求 < 300 ms），
+   四机环境待与成员8的压测脚本复测。
