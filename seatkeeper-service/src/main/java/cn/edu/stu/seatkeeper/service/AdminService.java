@@ -3,12 +3,13 @@ package cn.edu.stu.seatkeeper.service;
 import cn.edu.stu.seatkeeper.model.enums.ReservationStatus;
 import cn.edu.stu.seatkeeper.model.vo.AdminReservationPageVO;
 import cn.edu.stu.seatkeeper.model.vo.AdminReservationVO;
+import cn.edu.stu.seatkeeper.model.vo.CreditVO;
 import cn.edu.stu.seatkeeper.model.vo.SeatVO;
 import cn.edu.stu.seatkeeper.model.vo.StatsVO;
 import java.time.OffsetDateTime;
 import java.util.List;
 
-/** 管理端用例：座位状态、预约查询、强制取消与统计。 */
+/** 管理端用例：座位状态、预约查询、强制取消、信用查看与调整、统计。 */
 public interface AdminService {
 
     /**
@@ -46,6 +47,25 @@ public interface AdminService {
      * @return 取消后的预约
      */
     AdminReservationVO forceCancel(long id, String reason);
+
+    /**
+     * @param userId 用户标识
+     * @return 信用快照
+     */
+    CreditVO credit(long userId);
+
+    /**
+     * 管理员调整信用：必须绑定该用户的一条预约作为流水归属。
+     *
+     * <p>调整后低于 60 分时按统一规则限制预约 7 天。
+     *
+     * @param userId 目标用户
+     * @param reservationId 归属预约
+     * @param delta 分值变化
+     * @param reason 原因码
+     * @return 调整后的信用
+     */
+    CreditVO adjustCredit(long userId, long reservationId, int delta, String reason);
 
     /**
      * @param from 时段下界，可为空

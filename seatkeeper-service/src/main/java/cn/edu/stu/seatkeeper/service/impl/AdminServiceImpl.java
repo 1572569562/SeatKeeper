@@ -6,14 +6,17 @@ import cn.edu.stu.seatkeeper.mapper.CatalogMapper;
 import cn.edu.stu.seatkeeper.mapper.ReservationMapper;
 import cn.edu.stu.seatkeeper.model.enums.ReservationStatus;
 import cn.edu.stu.seatkeeper.model.po.AdminReservationRow;
+import cn.edu.stu.seatkeeper.model.po.CreditPO;
 import cn.edu.stu.seatkeeper.model.po.ReservationPO;
 import cn.edu.stu.seatkeeper.model.po.ReservationStatsRow;
 import cn.edu.stu.seatkeeper.model.po.SeatPO;
 import cn.edu.stu.seatkeeper.model.vo.AdminReservationPageVO;
 import cn.edu.stu.seatkeeper.model.vo.AdminReservationVO;
+import cn.edu.stu.seatkeeper.model.vo.CreditVO;
 import cn.edu.stu.seatkeeper.model.vo.SeatVO;
 import cn.edu.stu.seatkeeper.model.vo.StatsVO;
 import cn.edu.stu.seatkeeper.service.AdminService;
+import cn.edu.stu.seatkeeper.service.CreditDataService;
 import cn.edu.stu.seatkeeper.service.NotificationDataService;
 import cn.edu.stu.seatkeeper.service.ReservationDataService;
 import java.time.LocalDateTime;
@@ -35,20 +38,24 @@ public class AdminServiceImpl implements AdminService {
     private final ReservationMapper reservationMapper;
     private final ReservationDataService reservationDataService;
     private final NotificationDataService notificationDataService;
+    private final CreditDataService creditDataService;
 
     /**
      * @param catalogMapper 座位读写
      * @param reservationMapper 管理端查询与状态变更
      * @param reservationDataService 预约快照读取
      * @param notificationDataService 通知写入
+     * @param creditDataService 信用读取与调整
      */
     public AdminServiceImpl(CatalogMapper catalogMapper, ReservationMapper reservationMapper,
                             ReservationDataService reservationDataService,
-                            NotificationDataService notificationDataService) {
+                            NotificationDataService notificationDataService,
+                            CreditDataService creditDataService) {
         this.catalogMapper = catalogMapper;
         this.reservationMapper = reservationMapper;
         this.reservationDataService = reservationDataService;
         this.notificationDataService = notificationDataService;
+        this.creditDataService = creditDataService;
     }
 
     @Override
@@ -113,6 +120,40 @@ public class AdminServiceImpl implements AdminService {
 
     @Override
     @Transactional(readOnly = true)
+    public CreditVO credit(long userId) {
+        CreditPO credit = creditDataService.find(userId);
+        if (credit == null) {
+            throw new BusinessException(BizErrorCode.NOT_FOUND);
+        }
+        return toCreditVO(credit);
+    }
+
+    @Override
+    @Transactional
+    public CreditVO adjustCredit(long userId, long reservationId, int delta, String reason) {
+        // applyDelta 内部已核验预约归属、幂等键与余额范围，异常由全局处理器统一翻译。
+        creditDataService.applyDelta(userId, reservationId, delta, reason.trim());
+        CreditPO credit = creditDataService.find(userId);
+        if (credit == null) {
+            throw new BusinessException(BizErrorCode.NOT_FOUND);
+        }
+        // 与批处理保持一致：扣到 60 分以下限制预约 7 天；恢复到 60 分及以上则解除限制。
+        LocalDateTime now = LocalDateTime.now(OFFSET);
+        boolean restricted = credit.restrictedUntil() != null && credit.restrictedUntil().isAfter(now);
+        if (credit.score() < 60 && !restricted) {
+            creditDataService.updateRestriction(userId, credit.version(), now.plusDays(7));
+            credit = creditDataService.find(userId);
+        } else if (credit.score() >= 60 && restricted) {
+            creditDataService.updateRestriction(userId, credit.version(), null);
+            credit = creditDataService.find(userId);
+        }
+        notificationDataService.send(userId, "CREDIT",
+            "管理员调整信用 " + (delta > 0 ? "+" : "") + delta + " 分。原因：" + reason.trim() + "。");
+        return toCreditVO(credit);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
     public StatsVO stats(OffsetDateTime from, OffsetDateTime to) {
         ReservationStatsRow row = reservationMapper.countStats(toLocal(from), toLocal(to));
         long total = row == null ? 0 : row.total();
@@ -144,12 +185,21 @@ public class AdminServiceImpl implements AdminService {
      * @param row 管理端行
      * @return 对外视图
      */
-    private static AdminReservationVO toVO(AdminReservationRow row) {
-        return new AdminReservationVO(row.id(), row.studentNo(), row.studentName(),
+    private static AdminReservationVO toVO(AdminReservationRow row) {        return new AdminReservationVO(row.id(), row.studentNo(), row.studentName(),
             row.seatId(), row.seatNo(), row.room(), row.floor(),
             row.slotStart().atOffset(OFFSET), row.slotEnd().atOffset(OFFSET),
             row.checkInDeadline().atOffset(OFFSET),
             row.checkedInAt() == null ? null : row.checkedInAt().atOffset(OFFSET),
             row.status(), row.version());
+    }
+
+    /**
+     * @param credit 信用快照
+     * @return 对外视图
+     */
+    private static CreditVO toCreditVO(CreditPO credit) {
+        return new CreditVO(credit.userId(), credit.score(),
+            credit.restrictedUntil() == null ? null : credit.restrictedUntil().atOffset(OFFSET),
+            credit.version());
     }
 }

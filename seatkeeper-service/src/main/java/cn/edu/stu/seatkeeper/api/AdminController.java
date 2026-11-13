@@ -1,5 +1,6 @@
 package cn.edu.stu.seatkeeper.api;
 
+import cn.edu.stu.seatkeeper.model.dto.CreditAdjustDTO;
 import cn.edu.stu.seatkeeper.model.dto.ForceCancelDTO;
 import cn.edu.stu.seatkeeper.model.dto.SeatStatusDTO;
 import cn.edu.stu.seatkeeper.model.enums.ReservationStatus;
@@ -7,6 +8,7 @@ import cn.edu.stu.seatkeeper.model.result.Result;
 import cn.edu.stu.seatkeeper.model.result.ResultUtil;
 import cn.edu.stu.seatkeeper.model.vo.AdminReservationPageVO;
 import cn.edu.stu.seatkeeper.model.vo.AdminReservationVO;
+import cn.edu.stu.seatkeeper.model.vo.CreditVO;
 import cn.edu.stu.seatkeeper.model.vo.SeatVO;
 import cn.edu.stu.seatkeeper.model.vo.StatsVO;
 import cn.edu.stu.seatkeeper.service.AdminService;
@@ -101,5 +103,28 @@ public class AdminController {
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) OffsetDateTime from,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) OffsetDateTime to) {
         return ResultUtil.success(adminService.stats(from, to));
+    }
+
+    /**
+     * @param userId 用户标识
+     * @return 信用快照
+     */
+    @GetMapping("/credit/{userId}")
+    public Result<CreditVO> credit(@PathVariable long userId) {
+        return ResultUtil.success(adminService.credit(userId));
+    }
+
+    /**
+     * 管理员调整信用，必须绑定该用户的一条预约作为流水归属。
+     *
+     * @param userId 用户标识
+     * @param request 归属预约、分值与原因
+     * @return 调整后的信用
+     */
+    @PostMapping("/credit/{userId}/adjust")
+    public Result<CreditVO> adjustCredit(@PathVariable long userId,
+                                         @Valid @RequestBody CreditAdjustDTO request) {
+        return ResultUtil.success(adminService.adjustCredit(userId, request.reservationId(),
+            request.delta(), request.reason()));
     }
 }

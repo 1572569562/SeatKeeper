@@ -1,4 +1,4 @@
-﻿#requires -Version 7.2
+#requires -Version 7.2
 <#
 .SYNOPSIS
     成员 3 服务端自检脚本：登录、查询、预约、签到、批处理、管理端一次跑完。
@@ -22,6 +22,7 @@ param(
     [string]$StudentNo = '20230101',
     [string]$Password = 'Demo@123456',
     [string]$AdminNo = '90000001',
+    [string]$SlotDate,
     [string]$InternalToken = $(if ($env:INTERNAL_TOKEN) { $env:INTERNAL_TOKEN } else { 'dev-internal-token-change-me' })
 )
 
@@ -113,10 +114,19 @@ if (-not $studentToken) {
         Add-Result '座位查询' 'FAIL' "HTTP $($seats.Status)"
     }
 
-    # 5. 找一个尚未开始的时段
+    # 5. 找一个尚未开始的时段：先看今天到未来 7 天，再看演示固定日期
     $slot = $null
-    $date = (Get-Date).AddDays(1).ToString('yyyy-MM-dd')
-    foreach ($candidateDate in @((Get-Date).ToString('yyyy-MM-dd'), $date)) {
+    $candidateDates = @()
+    if ($SlotDate) {
+        $candidateDates += $SlotDate
+    } else {
+        for ($offset = 0; $offset -le 7; $offset++) {
+            $candidateDates += (Get-Date).AddDays($offset).ToString('yyyy-MM-dd')
+        }
+        # reset-demo.ps1 的默认演示日期固定为 2030-01-15，兼容这种远期数据
+        $candidateDates += '2030-01-15'
+    }
+    foreach ($candidateDate in $candidateDates) {
         $slots = Invoke-Api -Method Get -Path "/api/v1/slots?date=$candidateDate" -Token $studentToken
         if ($slots.Status -eq 200) {
             $slot = $slots.Body.data | Where-Object { [datetimeoffset]$_.startTime -gt [datetimeoffset]::Now } | Select-Object -First 1
@@ -124,7 +134,7 @@ if (-not $studentToken) {
         }
     }
     if (-not $slot) {
-        Add-Result '时段查询' 'SKIP' '没有未来时段（先跑 scripts/reset-demo.ps1 造数据）'
+        Add-Result '时段查询' 'SKIP' '没有未来时段（先跑 scripts/reset-demo.ps1，或用 -SlotDate 指定日期）'
     } else {
         Add-Result '时段查询' 'PASS' "$($slot.startTime)"
 

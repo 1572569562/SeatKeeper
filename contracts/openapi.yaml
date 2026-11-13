@@ -428,10 +428,6 @@ paths:
     get:
       tags: [admin]
       summary: 查询用户信用
-      deprecated: true
-      description: |
-        v1 暂不实现：管理端改分与数据模型的 credit_log.reservation_id NOT NULL 冲突，
-        等待 ADR-002 决策（见 docs/design/2026-11-13-member3-adr.md 的开放问题）。
       parameters:
         - name: userId
           in: path
@@ -454,11 +450,15 @@ paths:
   /api/v1/admin/credit/{userId}/adjust:
     post:
       tags: [admin]
-      summary: 管理员调整信用（带原因）
-      deprecated: true
+      summary: 管理员调整信用（带原因，绑定预约）
       description: |
-        v1 暂不实现，原因同上：信用流水必须绑定一条预约（外键 + 幂等键）。
-        可选方案：加 V4 迁移允许 reservation_id 为空，或改为"绑定预约的调整"。
+        受 `credit_log.reservation_id NOT NULL` 与 `uk_credit_res_reason` 约束，
+        每次调整必须绑定该用户的一条预约作为流水归属。
+
+        已知边界：
+        - 该用户没有任何预约时无法调整（没有可挂的流水归属）。
+        - 同一条预约 + 同一个 reason 只能调整一次；需要再次调整时请使用不同的原因码。
+        - 调整后低于 60 分时，按统一规则限制预约 7 天，并发送 CREDIT 通知。
       parameters:
         - name: userId
           in: path
@@ -477,6 +477,21 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/CreditResponse'
+        '404':
+          description: 预约不存在，或预约不属于该用户
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: 同一预约同一原因已调整过，且本次分值不同
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+                examples:
+                  idempotency:
+                    value: {code: IDEMPOTENCY_CONFLICT, message: 重复请求的参数与首次不一致}
         '422':
           description: 余额越界
           content:
@@ -811,10 +826,18 @@ components:
 
     CreditAdjustRequest:
       type: object
-      required: [delta, reason]
+      required: [reservationId, delta, reason]
       properties:
+        reservationId:
+          type: integer
+          format: int64
+          description: 归属预约，必须属于被调整用户；信用流水会挂在该预约上
         delta: {type: integer, minimum: -100, maximum: 100}
-        reason: {type: string, maxLength: 64, example: ADMIN_ADJUST}
+        reason:
+          type: string
+          maxLength: 64
+          example: ADMIN_APPEAL
+          description: 原因码，区分大小写；同一预约 + 同一原因只能调整一次
 
     StatsVO:
       type: object
