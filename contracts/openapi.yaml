@@ -1,0 +1,936 @@
+openapi: 3.0.3
+info:
+  title: SeatKeeper 预约服务接口契约
+  version: 1.0.0
+  description: |
+    SeatKeeper 唯一写业务表的服务（机器 A，端口 8080）。所有响应统一使用 Result 信封：
+    `{"code":"OK","message":"操作成功","data":...}`，失败时 `code` 为稳定错误码、`data` 为 null。
+
+    约定：
+    - 时间字段一律为带 +08:00 偏移的 ISO-8601 字符串，例如 `2026-11-14T08:00:00+08:00`。
+    - 业务时间以服务端为准，客户端传入的 slotStart 必须精确命中 slot 表的固定时段。
+    - 学生端与管理端使用 JWT（`Authorization: Bearer <token>`）。
+    - 内部接口使用共享密钥（`X-Internal-Token`），仅供守护节点与通知网关调用。
+servers:
+  - url: http://127.0.0.1:8080
+    description: 本机开发
+  - url: http://机器A内网地址:8080
+    description: 四机部署（机器 A）
+
+tags:
+  - name: auth
+    description: 登录与令牌
+  - name: catalog
+    description: 座位与时段
+  - name: reservation
+    description: 预约、签到、取消
+  - name: notification
+    description: 通知查询与已读
+  - name: admin
+    description: 管理端（需 ADMIN 角色）
+  - name: internal
+    description: 内部接口（守护节点 / 通知网关）
+
+security:
+  - bearerAuth: []
+
+paths:
+  /api/v1/health:
+    get:
+      tags: [auth]
+      summary: 健康检查（无需鉴权）
+      security: []
+      responses:
+        '200':
+          description: 应用与数据源状态
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+        '503':
+          description: 数据库不可用
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/auth/login:
+    post:
+      tags: [auth]
+      summary: 学号密码登录
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: 登录成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '401':
+          description: 学号或密码错误（不区分学号不存在与密码错误）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+                examples:
+                  unauthorized:
+                    value: {code: UNAUTHORIZED, message: 学号或密码错误}
+
+  /api/v1/seats:
+    get:
+      tags: [catalog]
+      summary: 按阅览室/楼层查询座位
+      parameters:
+        - name: room
+          in: query
+          schema: {type: string, maxLength: 64}
+        - name: floor
+          in: query
+          schema: {type: integer}
+      responses:
+        '200':
+          description: 座位列表（含 DISABLED，由客户端置灰）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SeatListResponse'
+
+  /api/v1/slots:
+    get:
+      tags: [catalog]
+      summary: 查询某日的固定时段
+      parameters:
+        - name: date
+          in: query
+          required: true
+          schema: {type: string, format: date, example: '2026-11-14'}
+      responses:
+        '200':
+          description: 时段列表，按开始时间正序，已开始的时段也会返回
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SlotListResponse'
+
+  /api/v1/reservations:
+    post:
+      tags: [reservation]
+      summary: 创建预约
+      description: |
+        校验顺序：时段合法 → 座位可用 → 信用未受限 → 同时预约数 ≤ 2 → 插入（唯一索引裁决冲突）。
+        成功后同事务写入一条 type=RESERVATION 的通知。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateReservationRequest'
+      responses:
+        '201':
+          description: 创建成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReservationResponse'
+        '409':
+          description: 座位已被占用，或座位已停用
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+                examples:
+                  taken:
+                    value: {code: SEAT_TAKEN, message: 该座位已被预约}
+                  disabled:
+                    value: {code: SEAT_DISABLED, message: 该座位已停用}
+        '422':
+          description: 时段不合法、超出预约数量限制或信用受限
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+                examples:
+                  limit:
+                    value: {code: LIMIT_EXCEEDED, message: 最多同时预约 2 个座位}
+                  slot:
+                    value: {code: SLOT_INVALID, message: 该时段不存在或已不可预约}
+                  credit:
+                    value: {code: CREDIT_RESTRICTED, message: 信用受限期间不能预约}
+    get:
+      tags: [reservation]
+      summary: 我的预约（分页，倒序）
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/SizeParam'
+        - name: status
+          in: query
+          schema: {$ref: '#/components/schemas/ReservationStatus'}
+      responses:
+        '200':
+          description: 预约分页
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReservationPageResponse'
+
+  /api/v1/reservations/{id}:
+    get:
+      tags: [reservation]
+      summary: 预约详情（仅本人）
+      parameters:
+        - $ref: '#/components/parameters/ReservationId'
+      responses:
+        '200':
+          description: 预约详情
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReservationResponse'
+        '404':
+          description: 预约不存在或不属于当前用户
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/reservations/{id}/check-in:
+    post:
+      tags: [reservation]
+      summary: 座位码签到
+      description: |
+        仅 RESERVED 可签到；必须在 [slotStart, checkInDeadline] 内；seatCode 必须等于座位号。
+        重复签到不改变状态，直接返回当前状态。
+      parameters:
+        - $ref: '#/components/parameters/ReservationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CheckInRequest'
+      responses:
+        '200':
+          description: 签到成功（或已签到，幂等）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CheckInResponse'
+        '404':
+          description: 预约不存在或不属于当前用户
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: 已取消或已过期
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+                examples:
+                  state:
+                    value: {code: INVALID_STATE, message: 已过期或已取消}
+        '422':
+          description: 座位码不一致，或不在签到时间窗口
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+                examples:
+                  mismatch:
+                    value: {code: SEAT_CODE_MISMATCH, message: 座位码与预约座位不一致}
+                  window:
+                    value: {code: CHECKIN_WINDOW, message: 不在签到时间窗口内}
+
+  /api/v1/reservations/{id}/cancel:
+    post:
+      tags: [reservation]
+      summary: 取消预约
+      description: 仅 RESERVED 可取消；取消不返还信用分；座位立即释放（生成列置空）。
+      parameters:
+        - $ref: '#/components/parameters/ReservationId'
+      responses:
+        '200':
+          description: 已取消
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReservationResponse'
+        '409':
+          description: 当前状态不允许取消
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/notifications:
+    get:
+      tags: [notification]
+      summary: 按游标增量拉取通知
+      description: 首次 afterId=0；返回 lastId 作为下次游标。消息 id 可能不连续。
+      parameters:
+        - name: afterId
+          in: query
+          schema: {type: integer, format: int64, minimum: 0, default: 0}
+        - name: limit
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 100, default: 50}
+      responses:
+        '200':
+          description: 通知增量
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationPageResponse'
+
+  /api/v1/notifications/read:
+    post:
+      tags: [notification]
+      summary: 标记已读
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MarkReadRequest'
+      responses:
+        '200':
+          description: 实际由未读变为已读的条数
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CountResponse'
+
+  /api/v1/admin/seats:
+    get:
+      tags: [admin]
+      summary: 座位管理列表（含 DISABLED）
+      parameters:
+        - name: room
+          in: query
+          schema: {type: string, maxLength: 64}
+        - name: floor
+          in: query
+          schema: {type: integer}
+        - name: status
+          in: query
+          schema: {type: string, enum: [AVAILABLE, DISABLED]}
+      responses:
+        '200':
+          description: 座位列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SeatListResponse'
+
+  /api/v1/admin/seats/{id}:
+    patch:
+      tags: [admin]
+      summary: 停用 / 启用座位
+      description: 停用后拒绝新预约（409 SEAT_DISABLED），已有预约保留（重新启用即可签到）。
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: integer, format: int64}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SeatStatusRequest'
+      responses:
+        '200':
+          description: 更新后的座位
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SeatResponse'
+        '404':
+          description: 座位不存在
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/admin/reservations:
+    get:
+      tags: [admin]
+      summary: 按条件查询预约
+      parameters:
+        - name: studentNo
+          in: query
+          schema: {type: string}
+        - name: seatId
+          in: query
+          schema: {type: integer, format: int64}
+        - name: status
+          in: query
+          schema: {$ref: '#/components/schemas/ReservationStatus'}
+        - name: from
+          in: query
+          description: slot_start 下界（含）
+          schema: {type: string, format: date-time}
+        - name: to
+          in: query
+          description: slot_start 上界（不含）
+          schema: {type: string, format: date-time}
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/SizeParam'
+      responses:
+        '200':
+          description: 管理视角预约分页
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminReservationPageResponse'
+
+  /api/v1/admin/reservations/{id}/force-cancel:
+    post:
+      tags: [admin]
+      summary: 强制取消（记录操作原因）
+      description: 不扣分也不返还；向学生发送一条 SYSTEM 通知。
+      parameters:
+        - $ref: '#/components/parameters/ReservationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ForceCancelRequest'
+      responses:
+        '200':
+          description: 已取消
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReservationResponse'
+        '404':
+          description: 预约不存在
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: 当前状态不允许取消
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/admin/credit/{userId}:
+    get:
+      tags: [admin]
+      summary: 查询用户信用
+      deprecated: true
+      description: |
+        v1 暂不实现：管理端改分与数据模型的 credit_log.reservation_id NOT NULL 冲突，
+        等待 ADR-002 决策（见 docs/design/2026-11-13-member3-adr.md 的开放问题）。
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: {type: integer, format: int64}
+      responses:
+        '200':
+          description: 信用快照
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreditResponse'
+        '404':
+          description: 用户或信用账户不存在
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/admin/credit/{userId}/adjust:
+    post:
+      tags: [admin]
+      summary: 管理员调整信用（带原因）
+      deprecated: true
+      description: |
+        v1 暂不实现，原因同上：信用流水必须绑定一条预约（外键 + 幂等键）。
+        可选方案：加 V4 迁移允许 reservation_id 为空，或改为"绑定预约的调整"。
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: {type: integer, format: int64}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreditAdjustRequest'
+      responses:
+        '200':
+          description: 调整后的信用
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreditResponse'
+        '422':
+          description: 余额越界
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/admin/stats:
+    get:
+      tags: [admin]
+      summary: 统计看板（预约数 / 签到率 / 爽约率）
+      parameters:
+        - name: from
+          in: query
+          schema: {type: string, format: date-time}
+        - name: to
+          in: query
+          schema: {type: string, format: date-time}
+      responses:
+        '200':
+          description: 统计结果
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatsResponse'
+
+  /api/v1/internal/reservations/expire-batch:
+    post:
+      tags: [internal]
+      summary: 过期批处理（守护节点调用）
+      description: |
+        扫描 RESERVED 且 check_in_deadline < now 的预约，置 EXPIRED 并扣 10 分（reason=NO_SHOW）。
+        幂等：同一预约同一 reason 只产生一条信用流水，重复调用不会重复扣分。
+      security:
+        - internalToken: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BatchRequest'
+      responses:
+        '200':
+          description: 批次结果
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchResponse'
+
+  /api/v1/internal/reservations/complete-batch:
+    post:
+      tags: [internal]
+      summary: 正常完成批处理（守护节点调用）
+      description: |
+        扫描 CHECKED_IN 且 slot_end < now 的预约，置 COMPLETED 并加 1 分（reason=SYSTEM_COMPLETE）。
+        余额已满 100 时跳过加分但仍置 COMPLETED，避免守护节点无限重试。
+      security:
+        - internalToken: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BatchRequest'
+      responses:
+        '200':
+          description: 批次结果
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchResponse'
+
+  /api/v1/internal/notifications:
+    get:
+      tags: [internal]
+      summary: 网关增量读取通知（跨机，避免 D 机直连 MySQL）
+      security:
+        - internalToken: []
+      parameters:
+        - name: userId
+          in: query
+          required: true
+          schema: {type: integer, format: int64}
+        - name: afterId
+          in: query
+          schema: {type: integer, format: int64, minimum: 0, default: 0}
+        - name: limit
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 100, default: 50}
+      responses:
+        '200':
+          description: 通知增量
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationPageResponse'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    internalToken:
+      type: apiKey
+      in: header
+      name: X-Internal-Token
+
+  parameters:
+    ReservationId:
+      name: id
+      in: path
+      required: true
+      schema: {type: integer, format: int64}
+    PageParam:
+      name: page
+      in: query
+      schema: {type: integer, minimum: 1, default: 1}
+    SizeParam:
+      name: size
+      in: query
+      schema: {type: integer, minimum: 1, maximum: 100, default: 20}
+
+  schemas:
+    ApiResponse:
+      type: object
+      required: [code, message]
+      properties:
+        code: {type: string, example: OK}
+        message: {type: string, example: 操作成功}
+        data: {nullable: true}
+
+    ErrorResponse:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          enum:
+            - UNAUTHORIZED
+            - TOKEN_INVALID
+            - FORBIDDEN
+            - NOT_FOUND
+            - SEAT_TAKEN
+            - SEAT_DISABLED
+            - INVALID_STATE
+            - VERSION_CONFLICT
+            - IDEMPOTENCY_CONFLICT
+            - LIMIT_EXCEEDED
+            - SEAT_CODE_MISMATCH
+            - SLOT_INVALID
+            - CREDIT_RESTRICTED
+            - CREDIT_OUT_OF_RANGE
+            - CHECKIN_WINDOW
+            - INVALID_ARGUMENT
+            - INTERNAL_ERROR
+            - DATABASE_UNAVAILABLE
+        message: {type: string}
+        data: {nullable: true, example: null}
+
+    ReservationStatus:
+      type: string
+      enum: [RESERVED, CHECKED_IN, CANCELLED, EXPIRED, COMPLETED]
+
+    SeatStatus:
+      type: string
+      enum: [AVAILABLE, DISABLED]
+
+    LoginRequest:
+      type: object
+      required: [studentNo, password]
+      properties:
+        studentNo: {type: string, maxLength: 32, example: '20230101'}
+        password: {type: string, format: password, example: '******'}
+
+    LoginVO:
+      type: object
+      required: [token, role, name, credit]
+      properties:
+        token: {type: string}
+        role: {type: string, enum: [STUDENT, ADMIN]}
+        name: {type: string}
+        credit: {type: integer, minimum: 0, maximum: 100}
+        restrictedUntil:
+          type: string
+          format: date-time
+          nullable: true
+
+    SeatVO:
+      type: object
+      required: [id, room, floor, seatNo, status]
+      properties:
+        id: {type: integer, format: int64}
+        room: {type: string}
+        floor: {type: integer}
+        seatNo: {type: string, example: 'A-027'}
+        status: {$ref: '#/components/schemas/SeatStatus'}
+
+    SlotVO:
+      type: object
+      required: [id, startTime, endTime]
+      properties:
+        id: {type: integer, format: int64}
+        startTime: {type: string, format: date-time, example: '2026-11-14T08:00:00+08:00'}
+        endTime: {type: string, format: date-time, example: '2026-11-14T10:00:00+08:00'}
+
+    ReservationVO:
+      type: object
+      required: [id, seatId, seatNo, room, floor, slotStart, slotEnd, checkInDeadline, status]
+      properties:
+        id: {type: integer, format: int64, example: 8801}
+        seatId: {type: integer, format: int64}
+        seatNo: {type: string, example: 'A-027'}
+        room: {type: string}
+        floor: {type: integer}
+        slotStart: {type: string, format: date-time, example: '2026-11-14T08:00:00+08:00'}
+        slotEnd: {type: string, format: date-time, example: '2026-11-14T10:00:00+08:00'}
+        checkInDeadline: {type: string, format: date-time, example: '2026-11-14T08:15:00+08:00'}
+        status: {$ref: '#/components/schemas/ReservationStatus'}
+        version: {type: integer}
+
+    AdminReservationVO:
+      allOf:
+        - $ref: '#/components/schemas/ReservationVO'
+        - type: object
+          required: [studentNo, studentName]
+          properties:
+            studentNo: {type: string}
+            studentName: {type: string}
+            checkedInAt:
+              type: string
+              format: date-time
+              nullable: true
+              description: 首次签到时间，未签到为 null
+
+    CreateReservationRequest:
+      type: object
+      required: [seatId, slotStart]
+      properties:
+        seatId: {type: integer, format: int64, example: 1027}
+        slotStart: {type: string, format: date-time, example: '2026-11-14T08:00:00+08:00'}
+
+    CheckInRequest:
+      type: object
+      required: [seatCode]
+      properties:
+        seatCode: {type: string, maxLength: 32, example: 'A-027'}
+
+    CheckInResult:
+      type: object
+      required: [status, checkedInAt]
+      properties:
+        status: {$ref: '#/components/schemas/ReservationStatus'}
+        checkedInAt: {type: string, format: date-time}
+
+    NotificationVO:
+      type: object
+      required: [id, type, content, readFlag, createdAt]
+      properties:
+        id: {type: integer, format: int64}
+        type:
+          type: string
+          enum: [RESERVATION, CHECKIN, CREDIT, SYSTEM]
+        content: {type: string, maxLength: 1000}
+        readFlag: {type: boolean}
+        createdAt: {type: string, format: date-time}
+
+    NotificationPage:
+      type: object
+      required: [items, lastId, hasMore]
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/NotificationVO'}
+        lastId:
+          type: integer
+          format: int64
+          description: 本次返回的最大 id，作为下次 afterId；无数据时原样返回入参
+        hasMore: {type: boolean}
+
+    ReservationPage:
+      type: object
+      required: [items, page, size, hasMore]
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/ReservationVO'}
+        page: {type: integer}
+        size: {type: integer}
+        hasMore: {type: boolean}
+
+    AdminReservationPage:
+      type: object
+      required: [items, page, size, hasMore]
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/AdminReservationVO'}
+        page: {type: integer}
+        size: {type: integer}
+        hasMore: {type: boolean}
+
+    MarkReadRequest:
+      type: object
+      required: [ids]
+      properties:
+        ids:
+          type: array
+          maxItems: 100
+          items: {type: integer, format: int64}
+
+    SeatStatusRequest:
+      type: object
+      required: [status]
+      properties:
+        status: {$ref: '#/components/schemas/SeatStatus'}
+
+    ForceCancelRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason: {type: string, maxLength: 64}
+
+    CreditVO:
+      type: object
+      required: [userId, score, version]
+      properties:
+        userId: {type: integer, format: int64}
+        score: {type: integer, minimum: 0, maximum: 100}
+        restrictedUntil: {type: string, format: date-time, nullable: true}
+        version: {type: integer}
+
+    CreditAdjustRequest:
+      type: object
+      required: [delta, reason]
+      properties:
+        delta: {type: integer, minimum: -100, maximum: 100}
+        reason: {type: string, maxLength: 64, example: ADMIN_ADJUST}
+
+    StatsVO:
+      type: object
+      required: [totalReservations, checkedIn, noShow, checkInRate, noShowRate]
+      properties:
+        totalReservations: {type: integer}
+        checkedIn: {type: integer}
+        noShow: {type: integer}
+        checkInRate: {type: number, format: double}
+        noShowRate: {type: number, format: double}
+
+    BatchRequest:
+      type: object
+      properties:
+        limit: {type: integer, minimum: 1, maximum: 200, default: 100}
+
+    BatchResult:
+      type: object
+      required: [processed, skipped, failed]
+      properties:
+        processed: {type: integer, description: 成功推进状态的数量}
+        skipped: {type: integer, description: 并发冲突或余额越界而跳过的数量}
+        failed: {type: integer, description: 处理异常的数量}
+
+    # ---- 响应信封 ----
+    HealthVO:
+      type: object
+      required: [status, database]
+      properties:
+        status: {type: string, example: UP}
+        database: {type: string, example: UP}
+    HealthResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiResponse'
+        - type: object
+          properties:
+            data: {$ref: '#/components/schemas/HealthVO'}
+    LoginResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiResponse'
+        - type: object
+          properties:
+            data: {$ref: '#/components/schemas/LoginVO'}
+    SeatListResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiResponse'
+        - type: object
+          properties:
+            data:
+              type: array
+              items: {$ref: '#/components/schemas/SeatVO'}
+    SeatResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiResponse'
+        - type: object
+          properties:
+            data: {$ref: '#/components/schemas/SeatVO'}
+    SlotListResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiResponse'
+        - type: object
+          properties:
+            data:
+              type: array
+              items: {$ref: '#/components/schemas/SlotVO'}
+    ReservationResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiResponse'
+        - type: object
+          properties:
+            data: {$ref: '#/components/schemas/ReservationVO'}
+    ReservationPageResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiResponse'
+        - type: object
+          properties:
+            data: {$ref: '#/components/schemas/ReservationPage'}
+    AdminReservationPageResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiResponse'
+        - type: object
+          properties:
+            data: {$ref: '#/components/schemas/AdminReservationPage'}
+    CheckInResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiResponse'
+        - type: object
+          properties:
+            data: {$ref: '#/components/schemas/CheckInResult'}
+    NotificationPageResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiResponse'
+        - type: object
+          properties:
+            data: {$ref: '#/components/schemas/NotificationPage'}
+    CountResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiResponse'
+        - type: object
+          properties:
+            data: {type: integer}
+    CreditResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiResponse'
+        - type: object
+          properties:
+            data: {$ref: '#/components/schemas/CreditVO'}
+    StatsResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiResponse'
+        - type: object
+          properties:
+            data: {$ref: '#/components/schemas/StatsVO'}
+    BatchResponse:
+      allOf:
+        - $ref: '#/components/schemas/ApiResponse'
+        - type: object
+          properties:
+            data: {$ref: '#/components/schemas/BatchResult'}

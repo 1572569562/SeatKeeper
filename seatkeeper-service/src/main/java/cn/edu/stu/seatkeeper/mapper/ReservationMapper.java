@@ -45,4 +45,74 @@ public interface ReservationMapper {
      */
     int changeStatus(@Param("id") long id, @Param("userId") long userId,
             @Param("expectedVersion") int expectedVersion, @Param("status") ReservationStatus status);
+    /**
+     * 统计用户当前仍占用中的预约数量，用于"同时最多 2 个"的业务校验。
+     * @param userId 用户标识
+     * @param now 以服务端时间为准的比较基准
+     */
+    int countActiveByUser(@Param("userId") long userId, @Param("now") LocalDateTime now);
+    /**
+     * 按可选状态过滤并分页读取用户预约，倒序与 listByUser 一致。
+     * @param userId 用户标识
+     * @param status 状态过滤，可为空
+     * @param offset 从零开始的分页偏移
+     * @param limit 本页数量上限
+     */
+    List<ReservationPO> listByUserAndStatus(@Param("userId") long userId,
+            @Param("status") ReservationStatus status, @Param("offset") int offset, @Param("limit") int limit);
+    /**
+     * 仅把 RESERVED 且版本匹配的预约置为 CHECKED_IN，并记录首次签到时间。
+     * @param id 预约标识
+     * @param userId 用户标识
+     * @param expectedVersion 预期版本
+     * @param now 服务端当前时间
+     */
+    int markCheckedIn(@Param("id") long id, @Param("userId") long userId,
+            @Param("expectedVersion") int expectedVersion, @Param("now") LocalDateTime now);
+    /**
+     * 扫描已过签到截止仍未签到的预约，供守护节点批处理。
+     * @param now 服务端当前时间
+     * @param limit 本批上限
+     */
+    List<ReservationPO> listExpiredCandidates(@Param("now") LocalDateTime now, @Param("limit") int limit);
+    /**
+     * 扫描已结束仍处于使用中的预约，供守护节点批处理。
+     * @param now 服务端当前时间
+     * @param limit 本批上限
+     */
+    List<ReservationPO> listCompletedCandidates(@Param("now") LocalDateTime now, @Param("limit") int limit);
+    /**
+     * 管理端多条件查询，附带学生与座位信息。
+     * @param studentNo 学号，可为空
+     * @param seatId 座位标识，可为空
+     * @param status 状态，可为空
+     * @param from 时段下界（含），可为空
+     * @param to 时段上界（不含），可为空
+     * @param offset 分页偏移
+     * @param limit 本页上限
+     */
+    List<cn.edu.stu.seatkeeper.model.po.AdminReservationRow> searchAdmin(
+            @Param("studentNo") String studentNo, @Param("seatId") Long seatId,
+            @Param("status") ReservationStatus status, @Param("from") LocalDateTime from,
+            @Param("to") LocalDateTime to, @Param("offset") int offset, @Param("limit") int limit);
+    /**
+     * 按主键读取管理端行（含学生与座位信息）。
+     * @param id 预约标识
+     */
+    cn.edu.stu.seatkeeper.model.po.AdminReservationRow findAdminRow(@Param("id") long id);
+    /**
+     * 管理端状态变更：只按主键与版本匹配，不校验用户归属。
+     * @param id 预约标识
+     * @param expectedVersion 预期版本
+     * @param status 目标状态
+     */
+    int changeStatusAsAdmin(@Param("id") long id, @Param("expectedVersion") int expectedVersion,
+            @Param("status") ReservationStatus status);
+    /**
+     * 统计区间内的预约、签到与爽约数量。
+     * @param from 时段下界（含），可为空
+     * @param to 时段上界（不含），可为空
+     */
+    cn.edu.stu.seatkeeper.model.po.ReservationStatsRow countStats(
+            @Param("from") LocalDateTime from, @Param("to") LocalDateTime to);
 }

@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="cn.edu.stu.seatkeeper.mapper.AccountMapper">
+    <!-- 仅认证服务使用；密码哈希不进入任何对外 VO。 -->
+    <select id="findByStudentNo" resultType="cn.edu.stu.seatkeeper.model.po.UserCredentialPO">
+        SELECT id, student_no, name, password_hash, role, status
+        FROM app_user WHERE student_no = #{studentNo}
+    </select>
+    <select id="findIdByStudentNo" resultType="java.lang.Long">
+        SELECT id FROM app_user WHERE student_no = #{studentNo}
+    </select>
+    <insert id="insertUser">
+        INSERT INTO app_user (student_no, name, password_hash, role, status)
+        VALUES (#{studentNo}, #{name}, #{passwordHash}, #{role}, 'ACTIVE')
+    </insert>
+    <!-- 开户必须同时建信用账户，否则通知发送会因缺少信用行被拒绝。 -->
+    <insert id="insertCreditIfAbsent">
+        INSERT INTO credit (user_id, score, restricted_until, version)
+        VALUES (#{userId}, 100, NULL, 0)
+        ON DUPLICATE KEY UPDATE user_id = user_id
+    </insert>
+</mapper>

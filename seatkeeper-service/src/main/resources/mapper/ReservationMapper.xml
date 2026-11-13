@@ -2,7 +2,7 @@
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="cn.edu.stu.seatkeeper.mapper.ReservationMapper">
     <!-- 预约快照字段，包含用于条件更新的版本号。 -->
-    <sql id="columns">id, user_id, seat_id, slot_start, slot_end, status, check_in_deadline, version</sql>
+    <sql id="columns">id, user_id, seat_id, slot_start, slot_end, status, check_in_deadline, checked_in_at, version</sql>
     <!-- 结束时间只从已登记时段取得，未登记的开始时间插入零行。 -->
     <insert id="insertFromSlot">
         INSERT INTO reservation (user_id, seat_id, slot_start, slot_end, status, check_in_deadline, version)
@@ -25,4 +25,70 @@
         UPDATE reservation SET status = #{status}, version = version + 1
         WHERE id = #{id} AND user_id = #{userId} AND version = #{expectedVersion}
     </update>
+    <!-- 签到专用更新：只允许 RESERVED 转 CHECKED_IN，并锁定首次签到时间。 -->
+    <update id="markCheckedIn">
+        UPDATE reservation SET status = 'CHECKED_IN', checked_in_at = #{now}, version = version + 1
+        WHERE id = #{id} AND user_id = #{userId} AND version = #{expectedVersion} AND status = 'RESERVED'
+    </update>
+    <!-- 只统计仍占用座位且尚未结束的预约，避免历史过期记录占据名额。 -->
+    <select id="countActiveByUser" resultType="int">
+        SELECT COUNT(*) FROM reservation
+        WHERE user_id = #{userId} AND status IN ('RESERVED', 'CHECKED_IN') AND slot_end &gt; #{now}
+    </select>
+    <select id="listByUserAndStatus" resultType="cn.edu.stu.seatkeeper.model.po.ReservationPO">
+        SELECT <include refid="columns"/> FROM reservation WHERE user_id = #{userId}
+        <if test="status != null">AND status = #{status}</if>
+        ORDER BY slot_start DESC, id DESC LIMIT #{limit} OFFSET #{offset}
+    </select>
+    <!-- 守护节点候选：按截止时间排序，先到期的先处理。 -->
+    <select id="listExpiredCandidates" resultType="cn.edu.stu.seatkeeper.model.po.ReservationPO">
+        SELECT <include refid="columns"/> FROM reservation
+        WHERE status = 'RESERVED' AND check_in_deadline &lt; #{now}
+        ORDER BY check_in_deadline, id LIMIT #{limit}
+    </select>
+    <select id="listCompletedCandidates" resultType="cn.edu.stu.seatkeeper.model.po.ReservationPO">
+        SELECT <include refid="columns"/> FROM reservation
+        WHERE status = 'CHECKED_IN' AND slot_end &lt; #{now}
+        ORDER BY slot_end, id LIMIT #{limit}
+    </select>
+    <!-- 管理端查询：一次连接学生与座位，避免 N+1。 -->
+    <select id="searchAdmin" resultType="cn.edu.stu.seatkeeper.model.po.AdminReservationRow">
+        SELECT r.id, r.user_id, r.seat_id, r.slot_start, r.slot_end, r.status,
+               r.check_in_deadline, r.checked_in_at, r.version,
+               u.student_no, u.name AS student_name, s.room, s.floor, s.seat_no
+        FROM reservation r
+        JOIN app_user u ON u.id = r.user_id
+        JOIN seat s ON s.id = r.seat_id
+        <where>
+            <if test="studentNo != null and studentNo != ''">u.student_no = #{studentNo}</if>
+            <if test="seatId != null">AND r.seat_id = #{seatId}</if>
+            <if test="status != null">AND r.status = #{status}</if>
+            <if test="from != null">AND r.slot_start &gt;= #{from}</if>
+            <if test="to != null">AND r.slot_start &lt; #{to}</if>
+        </where>
+        ORDER BY r.slot_start DESC, r.id DESC LIMIT #{limit} OFFSET #{offset}
+    </select>
+    <update id="changeStatusAsAdmin">
+        UPDATE reservation SET status = #{status}, version = version + 1
+        WHERE id = #{id} AND version = #{expectedVersion}
+    </update>
+    <select id="findAdminRow" resultType="cn.edu.stu.seatkeeper.model.po.AdminReservationRow">
+        SELECT r.id, r.user_id, r.seat_id, r.slot_start, r.slot_end, r.status,
+               r.check_in_deadline, r.checked_in_at, r.version,
+               u.student_no, u.name AS student_name, s.room, s.floor, s.seat_no
+        FROM reservation r
+        JOIN app_user u ON u.id = r.user_id
+        JOIN seat s ON s.id = r.seat_id
+        WHERE r.id = #{id}
+    </select>
+    <select id="countStats" resultType="cn.edu.stu.seatkeeper.model.po.ReservationStatsRow">
+        SELECT COUNT(*) AS total,
+               COALESCE(SUM(status IN ('CHECKED_IN', 'COMPLETED')), 0) AS checked_in,
+               COALESCE(SUM(status = 'EXPIRED'), 0) AS no_show
+        FROM reservation
+        <where>
+            <if test="from != null">slot_start &gt;= #{from}</if>
+            <if test="to != null">AND slot_start &lt; #{to}</if>
+        </where>
+    </select>
 </mapper>

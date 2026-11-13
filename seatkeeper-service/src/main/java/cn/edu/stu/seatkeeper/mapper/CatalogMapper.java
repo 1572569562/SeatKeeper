@@ -29,4 +29,23 @@ public interface CatalogMapper {
      * @param until 不包含的结束时间
      */
     List<SlotPO> listSlots(@Param("from") LocalDateTime from, @Param("until") LocalDateTime until);
+    /**
+     * 按主键读取单个座位，供预约校验与视图拼装使用。
+     * @param id 座位标识
+     */
+    SeatPO findSeat(@Param("id") long id);
+    /**
+     * 管理端座位列表，额外支持按状态过滤。
+     * @param room 阅览室，可为空
+     * @param floor 楼层，可为空
+     * @param status 座位状态，可为空
+     */
+    List<SeatPO> listSeatsForAdmin(@Param("room") String room, @Param("floor") Integer floor,
+            @Param("status") String status);
+    /**
+     * 更新座位状态，仅允许 AVAILABLE / DISABLED（由服务层校验）。
+     * @param id 座位标识
+     * @param status 目标状态
+     */
+    int updateSeatStatus(@Param("id") long id, @Param("status") String status);
 }

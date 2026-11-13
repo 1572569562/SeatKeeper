@@ -10,3 +10,5 @@
 backups/
 scripts/tests/artifacts/
 .runtime/
+# 本地构建缓存（沙箱内复制 Maven 仓库用），不提交
+.build/
