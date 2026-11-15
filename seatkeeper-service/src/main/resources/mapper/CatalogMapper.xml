@@ -20,4 +20,19 @@
         WHERE start_time &gt;= #{from} AND start_time &lt; #{until}
         ORDER BY start_time
     </select>
+    <select id="findSeat" resultType="cn.edu.stu.seatkeeper.model.po.SeatPO">
+        SELECT id, room, floor, seat_no, status FROM seat WHERE id = #{id}
+    </select>
+    <select id="listSeatsForAdmin" resultType="cn.edu.stu.seatkeeper.model.po.SeatPO">
+        SELECT id, room, floor, seat_no, status FROM seat
+        <where>
+            <if test="room != null and room != ''">room = #{room}</if>
+            <if test="floor != null">AND floor = #{floor}</if>
+            <if test="status != null and status != ''">AND status = #{status}</if>
+        </where>
+        ORDER BY room, floor, seat_no, id
+    </select>
+    <update id="updateSeatStatus">
+        UPDATE seat SET status = #{status} WHERE id = #{id}
+    </update>
 </mapper>
