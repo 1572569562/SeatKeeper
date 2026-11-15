@@ -1,0 +1,375 @@
+/* SeatKeeper 管理端样式
+   约定：
+   - 窗口底色 #f5f7fa，内容一律放进白色 .card
+   - 品牌色 #2563eb，边框 #e5e7eb，次要文字 #6b7280
+*/
+
+.root {
+    -fx-font-family: "Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI", sans-serif;
+}
+
+/* ---------- 顶栏 ---------- */
+.top-bar {
+    -fx-background-color: #ffffff;
+    -fx-border-color: transparent transparent #e5e7eb transparent;
+    -fx-border-width: 0 0 1 0;
+}
+
+.crumb-root {
+    -fx-text-fill: #9ca3af;
+    -fx-font-size: 12px;
+}
+
+.crumb-current {
+    -fx-text-fill: #111827;
+    -fx-font-size: 14px;
+    -fx-font-weight: bold;
+}
+
+.badge {
+    -fx-background-color: #f3f4f6;
+    -fx-text-fill: #4b5563;
+    -fx-padding: 3 8 3 8;
+    -fx-background-radius: 10;
+    -fx-font-size: 11px;
+}
+
+.badge-mock {
+    -fx-background-color: #fef3c7;
+    -fx-text-fill: #92400e;
+}
+
+.user-name {
+    -fx-text-fill: #374151;
+    -fx-font-size: 12px;
+}
+
+.link-button {
+    -fx-background-color: transparent;
+    -fx-text-fill: #2563eb;
+    -fx-font-size: 12px;
+    -fx-cursor: hand;
+    -fx-padding: 2 4 2 4;
+}
+
+.link-button:hover {
+    -fx-underline: true;
+}
+
+.link-button:disabled {
+    -fx-opacity: 0.35;
+    -fx-cursor: default;
+}
+
+/* 卡片里的小面板（信用页用） */
+.sub-panel {
+    -fx-background-color: #f9fafb;
+    -fx-background-radius: 8;
+    -fx-border-color: #eef0f3;
+    -fx-border-radius: 8;
+    -fx-border-width: 1;
+    -fx-padding: 18 20 18 20;
+}
+
+/* ---------- 统计看板（W6） ---------- */
+.stat-card {
+    -fx-background-color: #ffffff;
+    -fx-border-color: #e5e7eb;
+    -fx-border-width: 1;
+    -fx-border-radius: 8;
+    -fx-background-radius: 8;
+    -fx-padding: 16 18 16 18;
+}
+
+.stat-card:hover {
+    -fx-border-color: #bfdbfe;
+}
+
+.rate-bar {
+    -fx-pref-height: 8;
+}
+
+.rate-bar > .track {
+    -fx-background-color: #f3f4f6;
+    -fx-background-radius: 999;
+}
+
+.rate-bar > .bar {
+    -fx-background-radius: 999;
+    -fx-background-insets: 0;
+}
+
+/* ---------- 左侧导航 ---------- */
+.side-nav {
+    -fx-background-color: #ffffff;
+    -fx-border-color: transparent #e5e7eb transparent transparent;
+    -fx-border-width: 0 1 0 0;
+}
+
+.nav-section {
+    -fx-text-fill: #9ca3af;
+    -fx-font-size: 11px;
+    -fx-padding: 18 0 6 20;
+}
+
+/* 不用 ListView，用 ToggleButton 做导航项：没有斑马纹，选中态自己控制 */
+.nav-item {
+    -fx-background-color: transparent;
+    -fx-background-insets: 0;
+    -fx-background-radius: 0;
+    -fx-border-color: transparent;
+    -fx-border-width: 0 0 0 3;
+    -fx-border-insets: 0;
+    -fx-text-fill: #4b5563;
+    -fx-font-size: 13px;
+    -fx-alignment: CENTER_LEFT;
+    -fx-padding: 0 0 0 13;
+    -fx-pref-height: 40;
+    -fx-max-width: Infinity;
+    -fx-cursor: hand;
+    -fx-focus-color: transparent;
+    -fx-faint-focus-color: transparent;
+}
+
+.nav-item:hover {
+    -fx-background-color: #f9fafb;
+}
+
+.nav-item:selected {
+    -fx-background-color: #eff6ff;
+    -fx-border-color: #2563eb;
+    -fx-text-fill: #2563eb;
+    -fx-font-weight: bold;
+}
+
+.nav-icon {
+    -fx-fill: #9ca3af;
+}
+
+.nav-item:selected .nav-icon {
+    -fx-fill: #2563eb;
+}
+
+/* ---------- 内容区 ---------- */
+.content-bg {
+    -fx-background-color: #f5f7fa;
+}
+
+.card {
+    -fx-background-color: #ffffff;
+    -fx-background-radius: 8;
+    -fx-border-radius: 8;
+    -fx-border-color: #e5e7eb;
+    -fx-border-width: 1;
+    -fx-padding: 22 24 20 24;
+}
+
+.page-title {
+    -fx-font-size: 20px;
+    -fx-font-weight: bold;
+    -fx-text-fill: #111827;
+}
+
+.page-desc {
+    -fx-font-size: 13px;
+    -fx-text-fill: #6b7280;
+    -fx-line-spacing: 3;
+}
+
+.empty-text {
+    -fx-font-size: 13px;
+    -fx-text-fill: #9ca3af;
+}
+
+.empty-icon {
+    -fx-fill: #d1d5db;
+}
+
+.toolbar-button {
+    -fx-background-color: #ffffff;
+    -fx-border-color: #d1d5db;
+    -fx-border-radius: 6;
+    -fx-background-radius: 6;
+    -fx-text-fill: #374151;
+    -fx-font-size: 12px;
+    -fx-padding: 5 12 5 12;
+    -fx-cursor: hand;
+}
+
+.toolbar-button:hover {
+    -fx-border-color: #9ca3af;
+}
+
+/* ---------- 座位网格（W2 座位管理页） ---------- */
+.muted-small {
+    -fx-font-size: 12px;
+    -fx-text-fill: #6b7280;
+}
+
+.form-label {
+    -fx-font-size: 12px;
+    -fx-text-fill: #6b7280;
+}
+
+.seat-cell {
+    -fx-background-insets: 0;
+    -fx-border-insets: 0;
+    -fx-background-radius: 8;
+    -fx-border-radius: 8;
+    -fx-border-width: 1;
+    -fx-padding: 0;
+    -fx-cursor: hand;
+    -fx-effect: null;
+}
+
+.seat-cell:hover {
+    -fx-effect: dropshadow(gaussian, rgba(17, 24, 39, 0.14), 8, 0, 0, 2);
+}
+
+/* 三种状态三种配色，一眼能分出可用 / 已预约 / 停用 */
+.seat-available {
+    -fx-background-color: #ffffff;
+    -fx-border-color: #6ee7b7;
+}
+
+.seat-reserved {
+    -fx-background-color: #eff6ff;
+    -fx-border-color: #bfdbfe;
+}
+
+.seat-disabled {
+    -fx-background-color: #f9fafb;
+    -fx-border-color: #e5e7eb;
+}
+
+.seat-no {
+    -fx-font-size: 13px;
+    -fx-font-weight: bold;
+    -fx-text-fill: #111827;
+}
+
+.seat-status-text {
+    -fx-font-size: 10px;
+}
+
+.seat-status-available {
+    -fx-text-fill: #059669;
+}
+
+.seat-status-reserved {
+    -fx-text-fill: #2563eb;
+}
+
+.seat-status-disabled {
+    -fx-text-fill: #9ca3af;
+}
+
+/* 座位网格的滚动区不要白底，跟卡片融为一体 */
+.seat-scroll {
+    -fx-background-color: transparent;
+}
+
+.seat-scroll > .viewport {
+    -fx-background-color: transparent;
+}
+
+/* ---------- 预约查询页（W4） ---------- */
+.primary-button {
+    -fx-background-color: #2563eb;
+    -fx-text-fill: white;
+    -fx-background-radius: 6;
+    -fx-font-size: 12px;
+    -fx-padding: 6 16 6 16;
+    -fx-cursor: hand;
+}
+
+.primary-button:hover {
+    -fx-background-color: #1d4ed8;
+}
+
+.primary-button:disabled {
+    -fx-opacity: 0.55;
+}
+
+/* 预约状态小标签 */
+.status-chip {
+    -fx-padding: 2 8 2 8;
+    -fx-background-radius: 10;
+    -fx-font-size: 11px;
+}
+
+.status-reserved {
+    -fx-background-color: #eff6ff;
+    -fx-text-fill: #2563eb;
+}
+
+.status-checked {
+    -fx-background-color: #ecfdf5;
+    -fx-text-fill: #059669;
+}
+
+.status-cancelled {
+    -fx-background-color: #f3f4f6;
+    -fx-text-fill: #6b7280;
+}
+
+.status-expired {
+    -fx-background-color: #fef2f2;
+    -fx-text-fill: #b91c1c;
+}
+
+.status-completed {
+    -fx-background-color: #f5f3ff;
+    -fx-text-fill: #7c3aed;
+}
+
+/* 表格：贴近卡片的浅色风格 */
+.table-view {
+    -fx-font-size: 12px;
+    -fx-background-color: transparent;
+    -fx-border-color: #e5e7eb;
+    -fx-border-radius: 6;
+    -fx-background-radius: 6;
+    -fx-padding: 0;
+}
+
+.table-view .column-header-background {
+    -fx-background-color: #f9fafb;
+    -fx-background-radius: 6 6 0 0;
+}
+
+.table-view .column-header {
+    -fx-background-color: transparent;
+    -fx-size: 34px;
+    -fx-border-color: transparent transparent #e5e7eb transparent;
+}
+
+.table-view .column-header .label {
+    -fx-text-fill: #4b5563;
+    -fx-font-size: 12px;
+    -fx-alignment: center-left;
+    -fx-padding: 0 0 0 8;
+}
+
+.table-row-cell {
+    -fx-cell-size: 34px;
+    -fx-background-color: white;
+    -fx-border-color: transparent transparent #f3f4f6 transparent;
+}
+
+.table-row-cell:odd {
+    -fx-background-color: #fcfcfd;
+}
+
+.table-row-cell:selected {
+    -fx-background-color: #eff6ff;
+}
+
+.table-row-cell:selected .text {
+    -fx-fill: #111827;
+}
+
+.table-view .placeholder .label {
+    -fx-text-fill: #9ca3af;
+    -fx-font-size: 13px;
+}
